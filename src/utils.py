@@ -6,7 +6,7 @@ from pandas.api.types import is_numeric_dtype
 from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
 from sklearn.impute import SimpleImputer
-from sklearn.preprocessing import OneHotEncoder
+from sklearn.preprocessing import OneHotEncoder, StandardScaler
 from joblib import dump, load
 
 
@@ -27,7 +27,7 @@ def load_historical(path:str) -> tuple[pd.DataFrame, pd.Series, pd.DataFrame]:
     df = pd.read_csv(path)
     if TARGET_COL not in df.columns:
         raise ValueError(f"Target column '{TARGET_COL}' not found in the dataset.")
-    X = df.drop(columns=[TARGET_COL])
+    X = df.drop(columns=[TARGET_COL, ID_COL], errors='ignore')  # Drop target and ID columns from features
     y = df[TARGET_COL]
     return X, y, df
 
@@ -67,7 +67,13 @@ def build_preprocess(X_schema: pd.DataFrame) -> ColumnTransformer:
 
     preprocess = ColumnTransformer(
         transformers=[
-            ('num', SimpleImputer(strategy='median'), num_cols),
+            ("num",
+                Pipeline(steps=[
+                    ("imputer", SimpleImputer(strategy="median")),
+                    ("scaler", StandardScaler())
+                ]),
+                num_cols
+            ),
             ('cat', Pipeline(steps=[
                 ('imputer', SimpleImputer(strategy='most_frequent')),
                 ('onehot', OneHotEncoder(handle_unknown='ignore')),
@@ -207,7 +213,8 @@ def prioritize_new_data(
     if not (0 < top_frac <= 1):
         raise ValueError("top_frac must be between 0 and 1.")
     
-    proba = pipe.predict_proba(new_df)[:, 1]  # Get probability of the positive class
+    X_new = new_df.drop(columns=[id_col], errors='ignore')  # Drop ID column for prediction
+    proba = pipe.predict_proba(X_new)[:, 1]  # Get probability of the positive class
 
     out = new_df[[id_col]].copy()
     out['risk_score'] = proba
